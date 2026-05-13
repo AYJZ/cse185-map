@@ -2,46 +2,369 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CSE 185 Pipeline Map</title>
   <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
   <style>
-    body { margin: 0; font-family: system-ui, sans-serif; }
-    #pipeline { display: block; }
+    :root {
+      --fg:           #18181b;
+      --fg-muted:     #3f3f46;
+      --fg-faint:     #71717a;
+      --rule:         #e4e4e7;
+      --rule-strong:  #d4d4d8;
+      --bg:           #ffffff;
+      --bg-subtle:    #fafafa;
+      --bg-hover:     #f4f4f5;
+      --edge:         #a1a1aa;
+      --chip-bg:      #f4f4f5;
+      --code-bg:      #18181b;
+      --code-fg:      #f4f4f5;
+      --accent:       #0a0a0a;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI",
+                   Roboto, "Helvetica Neue", Arial, sans-serif;
+      color: var(--fg);
+      background: var(--bg);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+    }
+
     #status { padding: 12px; color: #a00; font-family: monospace; }
+
+    /* ============ Page header (normal document flow) ============ */
+
+    .page-header-wrap { padding: 72px 32px 24px; }
+    .page-header { max-width: 760px; margin: 0 auto; }
+    .page-eyebrow {
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--fg-faint);
+      margin: 0 0 12px;
+    }
+    .page-title {
+      font-size: 40px; font-weight: 700;
+      letter-spacing: -0.02em; line-height: 1.1;
+      margin: 0 0 16px; color: var(--fg);
+    }
+    .page-lede {
+      font-size: 16px; line-height: 1.6;
+      color: var(--fg-muted);
+      margin: 0; max-width: 700px;
+    }
+
+    /* ============ Map area (contained, bordered box) ============ */
+
+    .map-outer {
+      max-width: 1440px;
+      margin: 24px auto 96px;
+      padding: 0 32px;
+    }
+    .map-wrap {
+      position: relative;
+      width: 100%;
+      height: min(78vh, 760px);
+      background: var(--bg-subtle);
+      border: 1px solid var(--rule);
+      border-radius: 12px;
+      overflow: auto;
+      cursor: grab;
+    }
+    .map-wrap.dragging { cursor: grabbing; }
+    .map-wrap.dragging * { user-select: none; }
+
+    #pipeline {
+      display: block;
+      font-family: inherit;
+    }
+    #pipeline text { font-family: inherit; }
+
+    /* Step boxes */
+    .step-group { cursor: pointer; }
+    .step-group rect.step-box {
+      fill: #fff;
+      stroke: var(--rule-strong);
+      stroke-width: 1.25;
+      transition: stroke 140ms ease;
+    }
+    .step-group rect.step-box { filter: url(#card-shadow); }
+    .step-group:hover rect.step-box {
+      stroke: var(--accent);
+      filter: url(#card-shadow-hover);
+    }
+
+    /* Edges */
+    .edge-path {
+      fill: none;
+      stroke: var(--edge);
+      stroke-width: 1.5;
+    }
+    #arrow .arrow-fill { fill: var(--edge); }
+
+    /* Edge labels (format pills on the lines) */
+    .edge-label-group { cursor: pointer; }
+    .edge-label-bg {
+      fill: #fff;
+      stroke: var(--rule-strong);
+      stroke-width: 1;
+      transition: fill 140ms ease, stroke 140ms ease;
+    }
+    .edge-label-group:hover .edge-label-bg {
+      fill: var(--bg-hover);
+      stroke: var(--accent);
+    }
+    .edge-label-text {
+      font-size: 12px;
+      font-weight: 500;
+      fill: var(--fg-muted);
+      dominant-baseline: middle;
+      text-anchor: middle;
+    }
+    .edge-label-group:hover .edge-label-text { fill: var(--fg); }
+
+    /* Step box typography */
+    .step-label-main { fill: var(--fg); font-weight: 600; }
+    .step-label-sub  { fill: var(--fg-muted); font-weight: 500; }
+
+    /* ============ Right panel ============ */
+
+    #panel-backdrop {
+      position: fixed; inset: 0;
+      background: rgba(24, 24, 27, 0.22);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 180ms ease;
+      z-index: 10;
+    }
+    #panel-backdrop.open { opacity: 1; pointer-events: auto; }
+
+    #panel {
+      position: fixed;
+      top: 0; right: 0; bottom: 0;
+      width: min(500px, 100vw);
+      background: #fff;
+      border-left: 1px solid var(--rule);
+      box-shadow: -16px 0 48px rgba(24, 24, 27, 0.08);
+      transform: translateX(100%);
+      transition: transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1);
+      z-index: 20;
+      overflow-y: auto;
+      padding: 28px 36px 56px;
+    }
+    #panel.open { transform: translateX(0); }
+
+    #panel-close {
+      position: absolute;
+      top: 14px; right: 14px;
+      width: 32px; height: 32px;
+      border: none; background: none;
+      font-size: 24px; line-height: 1;
+      cursor: pointer;
+      color: var(--fg-faint);
+      border-radius: 4px;
+      transition: background 120ms ease, color 120ms ease;
+    }
+    #panel-close:hover { background: var(--bg-hover); color: var(--fg); }
+
+    .panel-eyebrow {
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--fg-faint);
+      margin: 4px 0 14px;
+    }
+    .panel-title {
+      font-size: 28px; font-weight: 700;
+      letter-spacing: -0.015em; line-height: 1.2;
+      margin: 0 0 16px; color: var(--fg);
+    }
+    .panel-section-h {
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--fg-faint);
+      margin: 28px 0 12px;
+    }
+    .panel-body {
+      font-size: 15px; line-height: 1.62;
+      color: var(--fg);
+      margin: 0;
+    }
+
+    .chip {
+      display: inline-block;
+      padding: 4px 10px;
+      margin: 0 6px 8px 0;
+      background: var(--chip-bg);
+      border: 1px solid var(--rule);
+      border-radius: 5px;
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 13px;
+      color: var(--fg);
+    }
+    .chip-link {
+      cursor: pointer;
+      transition: background 120ms ease, border-color 120ms ease;
+    }
+    .chip-link:hover {
+      background: var(--bg-hover);
+      border-color: var(--rule-strong);
+    }
+
+    /* Tool cards */
+    .tool-entry {
+      display: block;
+      background: var(--bg-subtle);
+      border: 1px solid var(--rule);
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-bottom: 10px;
+      text-decoration: none;
+      color: inherit;
+      transition: background 140ms ease, border-color 140ms ease,
+                  transform 140ms ease;
+    }
+    a.tool-entry:hover {
+      background: #fff;
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+    .tool-entry-label {
+      font-size: 16px;
+      font-weight: 600;
+      color: var(--fg);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .tool-link-arrow {
+      font-size: 13px;
+      color: var(--fg-faint);
+      transition: color 140ms ease, transform 140ms ease;
+    }
+    a.tool-entry:hover .tool-link-arrow {
+      color: var(--fg);
+      transform: translate(2px, -2px);
+    }
+    .tool-entry-one-line {
+      font-size: 14px;
+      color: var(--fg-muted);
+      margin: 6px 0 0;
+      line-height: 1.55;
+    }
+    .tool-entry-none {
+      font-size: 14px;
+      color: var(--fg-muted);
+      font-style: italic;
+      padding: 4px 0;
+    }
+
+    .code-block {
+      background: var(--code-bg);
+      color: var(--code-fg);
+      font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      font-size: 13px;
+      padding: 14px 16px;
+      border-radius: 6px;
+      white-space: pre;
+      overflow-x: auto;
+      line-height: 1.55;
+      margin: 0;
+    }
   </style>
 </head>
 <body>
   <div id="status"></div>
-  <svg id="pipeline" xmlns="http://www.w3.org/2000/svg"></svg>
+
+  <div class="page-header-wrap">
+    <header class="page-header">
+      <p class="page-eyebrow">CSE 185 · Advanced Bioinformatics Lab</p>
+      <h1 class="page-title">Pipeline Map</h1>
+      <p class="page-lede">
+        Reference map of the dry lab pipeline in CSE&nbsp;185 (currently
+        Labs&nbsp;1&ndash;6). Each box is a step in the research flow, and
+        labels on the lines are the file formats that pass between them.
+        Click any box or label for details.
+      </p>
+    </header>
+  </div>
+
+  <div class="map-outer">
+    <div class="map-wrap" id="map-wrap">
+      <svg id="pipeline" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <marker id="arrow" viewBox="0 0 10 10"
+                  refX="9" refY="5"
+                  markerWidth="6" markerHeight="6"
+                  orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" class="arrow-fill" />
+          </marker>
+          <filter id="card-shadow"
+                  x="-30%" y="-30%" width="160%" height="160%">
+            <feDropShadow dx="0" dy="1" stdDeviation="2"
+                          flood-color="#18181b" flood-opacity="0.06" />
+          </filter>
+          <filter id="card-shadow-hover"
+                  x="-30%" y="-30%" width="160%" height="160%">
+            <feDropShadow dx="0" dy="3" stdDeviation="6"
+                          flood-color="#18181b" flood-opacity="0.14" />
+          </filter>
+        </defs>
+      </svg>
+
+    </div>
+  </div>
+
+  <div id="panel-backdrop"></div>
+  <aside id="panel" aria-hidden="true">
+    <button id="panel-close" aria-label="Close panel">×</button>
+    <div id="panel-content"></div>
+  </aside>
 
   <script>
     const SVG_NS = 'http://www.w3.org/2000/svg';
 
+    let DATA = null;
+    let STEP_BY_ID = {};
+    let FMT_BY_ID  = {};
+    let TOOL_BY_ID = {};
+    let CONTENT_W  = 0;
+    let CONTENT_H  = 0;
+    let zoomLevel  = 1;
+    const MIN_ZOOM = 0.25;
+    const MAX_ZOOM = 2.5;
+
     async function main() {
-      let data;
       try {
-        const res = await fetch('data/pipeline.yaml');
+        const res = await fetch(`data/pipeline.yaml?_=${Date.now()}`);
         if (!res.ok) throw new Error(`fetch ${res.status}`);
-        data = jsyaml.load(await res.text());
+        DATA = jsyaml.load(await res.text());
       } catch (err) {
         document.getElementById('status').textContent =
           `Failed to load data/pipeline.yaml: ${err.message}`;
         return;
       }
-      render(data);
+      STEP_BY_ID = Object.fromEntries(DATA.steps.map(s => [s.id, s]));
+      FMT_BY_ID  = Object.fromEntries(DATA.file_formats.map(f => [f.id, f]));
+      TOOL_BY_ID = Object.fromEntries(DATA.tools.map(t => [t.id, t]));
+
+      render();
+      wirePanel();
+      wireZoom();
     }
 
-    function render(data) {
-      const mainline = data.steps.filter(s => s.mainline);
-      const mainlineIds = new Set(mainline.map(s => s.id));
-      const edges = data.edges.filter(
-        e => mainlineIds.has(e.from) && mainlineIds.has(e.to)
-      );
-      const fmtById = Object.fromEntries(
-        data.file_formats.map(f => [f.id, f])
-      );
+    // ============ Layout ============
 
-      // Longest-path level from any root: column index.
+    function computeLayout(mainline, edges) {
+      const childrenOf = {};
+      const parentsOf  = {};
+      mainline.forEach(s => { childrenOf[s.id] = []; parentsOf[s.id] = []; });
+      edges.forEach(e => {
+        childrenOf[e.from].push(e.to);
+        parentsOf[e.to].push(e.from);
+      });
+
       const level = {};
       mainline.forEach(s => { level[s.id] = 0; });
       let changed = true;
@@ -49,98 +372,444 @@
         changed = false;
         for (const e of edges) {
           const next = level[e.from] + 1;
-          if (next > level[e.to]) {
-            level[e.to] = next;
-            changed = true;
-          }
+          if (next > level[e.to]) { level[e.to] = next; changed = true; }
         }
       }
 
-      // Group by level, stable order from steps[] declaration order.
-      const byLevel = {};
-      mainline.forEach(s => {
-        const l = level[s.id];
-        (byLevel[l] ||= []).push(s);
-      });
+      const roots = mainline.filter(s => parentsOf[s.id].length === 0).map(s => s.id);
+      const rowY = {};
+      let nextLeafRow = 0;
+      const visited = new Set();
 
-      // Layout constants.
-      const COL_W = 280, ROW_H = 110;
-      const BOX_W = 220, BOX_H = 56;
-      const PAD_X = 40, PAD_Y = 40;
+      function walk(id) {
+        if (visited.has(id)) return rowY[id];
+        visited.add(id);
+        const kids = childrenOf[id].slice().sort((a, b) =>
+          mainline.findIndex(s => s.id === a) - mainline.findIndex(s => s.id === b)
+        );
+        if (kids.length === 0) {
+          rowY[id] = nextLeafRow++;
+        } else {
+          const ys = kids.map(walk);
+          rowY[id] = (Math.min(...ys) + Math.max(...ys)) / 2;
+        }
+        return rowY[id];
+      }
+      roots.forEach(walk);
 
-      // Position each box.
+      return { level, rowY };
+    }
+
+    // ============ Render ============
+
+    function render() {
+      const mainline = DATA.steps.filter(s => s.mainline);
+      const mainlineIds = new Set(mainline.map(s => s.id));
+      const edges = DATA.edges.filter(
+        e => mainlineIds.has(e.from) && mainlineIds.has(e.to)
+      );
+
+      const { level, rowY } = computeLayout(mainline, edges);
+
+      // Wider columns → format pills on the lines have breathing room
+      // (e.g. the FASTA pill between genome_assembly and assembly_qc).
+      const COL_W = 420, ROW_H = 144;
+      const BOX_W = 280, BOX_H = 96;
+      const PAD_X = 60,  PAD_Y = 60;
+      const STUB_LEN = 170;
+
       const pos = {};
-      for (const [l, steps] of Object.entries(byLevel)) {
-        steps.forEach((s, i) => {
-          pos[s.id] = {
-            x: PAD_X + Number(l) * COL_W,
-            y: PAD_Y + i * ROW_H,
-            w: BOX_W,
-            h: BOX_H,
-          };
-        });
+      for (const s of mainline) {
+        pos[s.id] = {
+          x: PAD_X + level[s.id] * COL_W,
+          y: PAD_Y + rowY[s.id] * ROW_H,
+          w: BOX_W,
+          h: BOX_H,
+        };
       }
 
       const maxLevel = Math.max(...Object.values(level));
-      const maxRows  = Math.max(...Object.values(byLevel).map(a => a.length));
-      const svgW = PAD_X * 2 + (maxLevel + 1) * COL_W;
-      const svgH = PAD_Y * 2 + maxRows * ROW_H;
+      const maxRowY  = Math.max(...Object.values(rowY));
+      CONTENT_W = PAD_X * 2 + maxLevel * COL_W + BOX_W + STUB_LEN + 60;
+      CONTENT_H = PAD_Y * 2 + maxRowY  * ROW_H + BOX_H;
 
       const svg = document.getElementById('pipeline');
-      svg.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
-      svg.setAttribute('width', svgW);
-      svg.setAttribute('height', svgH);
+      [...svg.querySelectorAll(':scope > :not(defs)')].forEach(n => n.remove());
+      svg.setAttribute('viewBox', `0 0 ${CONTENT_W} ${CONTENT_H}`);
+      // SVG size will be set by applyZoom; start at natural size.
+      applyZoom(1);
 
-      // Draw edges first so boxes overlay them.
-      // All edges sharing a source originate from the source box's
-      // right-center point — that gives the "fan-out from one node" look.
+      // ---- Regular edges ----
+      const edgeLayer  = svgEl('g', { class: 'edges-layer' });
+      const labelLayer = svgEl('g', { class: 'edge-labels-layer' });
+      svg.appendChild(edgeLayer);
+
       for (const e of edges) {
         const s = pos[e.from], t = pos[e.to];
-        const x1 = s.x + s.w;
-        const y1 = s.y + s.h / 2;
-        const x2 = t.x;
-        const y2 = t.y + t.h / 2;
+        const sx = s.x + s.w, sy = s.y + s.h / 2;
+        const tx = t.x,        ty = t.y + t.h / 2;
 
-        const line = document.createElementNS(SVG_NS, 'line');
-        line.setAttribute('x1', x1);
-        line.setAttribute('y1', y1);
-        line.setAttribute('x2', x2);
-        line.setAttribute('y2', y2);
-        line.setAttribute('stroke', '#888');
-        line.setAttribute('stroke-width', '1');
-        svg.appendChild(line);
+        const dx = Math.max(60, (tx - sx) * 0.5);
+        const cx1 = sx + dx, cy1 = sy;
+        const cx2 = tx - dx, cy2 = ty;
 
-        const label = document.createElementNS(SVG_NS, 'text');
-        label.setAttribute('x', (x1 + x2) / 2);
-        label.setAttribute('y', (y1 + y2) / 2 - 4);
-        label.setAttribute('text-anchor', 'middle');
-        label.setAttribute('font-size', '11');
-        label.setAttribute('fill', '#555');
-        label.textContent = fmtById[e.format]?.label ?? e.format;
-        svg.appendChild(label);
+        edgeLayer.appendChild(svgEl('path', {
+          class: 'edge-path',
+          d: `M ${sx},${sy} C ${cx1},${cy1} ${cx2},${cy2} ${tx},${ty}`,
+          'marker-end': 'url(#arrow)',
+        }));
+
+        const mx = 0.125 * sx + 0.375 * cx1 + 0.375 * cx2 + 0.125 * tx;
+        const my = 0.125 * sy + 0.375 * cy1 + 0.375 * cy2 + 0.125 * ty;
+
+        appendEdgeLabel(labelLayer, e.format, mx, my);
       }
 
-      // Draw boxes.
+      // ---- Stub edges for uncovered outputs ----
       for (const s of mainline) {
         const p = pos[s.id];
-        const rect = document.createElementNS(SVG_NS, 'rect');
-        rect.setAttribute('x', p.x);
-        rect.setAttribute('y', p.y);
-        rect.setAttribute('width', p.w);
-        rect.setAttribute('height', p.h);
-        rect.setAttribute('fill', '#fff');
-        rect.setAttribute('stroke', '#333');
-        rect.setAttribute('stroke-width', '1');
-        svg.appendChild(rect);
+        const outboundFormats = new Set(
+          edges.filter(e => e.from === s.id).map(e => e.format)
+        );
+        const uncovered = [...new Set(
+          (s.outputs ?? []).filter(f => !outboundFormats.has(f))
+        )];
+        if (uncovered.length === 0) continue;
 
-        const text = document.createElementNS(SVG_NS, 'text');
-        text.setAttribute('x', p.x + p.w / 2);
-        text.setAttribute('y', p.y + p.h / 2 + 4);
-        text.setAttribute('text-anchor', 'middle');
-        text.setAttribute('font-size', '13');
-        text.textContent = s.label;
-        svg.appendChild(text);
+        const sx = p.x + p.w;
+        const sy = p.y + p.h / 2;
+        const STUB_GAP = 32;
+
+        uncovered.forEach((fid, i) => {
+          const n = uncovered.length;
+          const offset = (i - (n - 1) / 2) * STUB_GAP;
+          const tx = sx + STUB_LEN;
+          const ty = sy + offset;
+
+          const dx = STUB_LEN * 0.5;
+          edgeLayer.appendChild(svgEl('path', {
+            class: 'edge-path',
+            d: `M ${sx},${sy} C ${sx + dx},${sy} ${tx - dx},${ty} ${tx},${ty}`,
+          }));
+
+          // Pill at the end is the terminus — no arrow.
+          appendEdgeLabel(labelLayer, fid, tx, ty);
+        });
       }
+
+      // ---- Boxes ----
+      const boxLayer = svgEl('g', { class: 'boxes-layer' });
+      svg.appendChild(boxLayer);
+      svg.appendChild(labelLayer);  // labels above boxes
+
+      for (const s of mainline) {
+        const p = pos[s.id];
+        const g = svgEl('g', { class: 'step-group' });
+
+        g.appendChild(svgEl('rect', {
+          class: 'step-box',
+          x: p.x, y: p.y, width: p.w, height: p.h,
+          rx: 10, ry: 10,
+        }));
+
+        const toolNames = (s.tools ?? [])
+          .map(tid => TOOL_BY_ID[tid]?.label ?? tid);
+        const hasTools = toolNames.length > 0;
+
+        if (hasTools) {
+          const label = svgEl('text', {
+            class: 'step-label-main',
+            x: p.x + p.w / 2, y: p.y + 40,
+            'text-anchor': 'middle',
+            'font-size': 16,
+          });
+          label.textContent = s.label;
+          g.appendChild(label);
+
+          const sub = svgEl('text', {
+            class: 'step-label-sub',
+            x: p.x + p.w / 2, y: p.y + 68,
+            'text-anchor': 'middle',
+            'font-size': 13,
+          });
+          sub.textContent = toolSubline(toolNames);
+          g.appendChild(sub);
+        } else {
+          const label = svgEl('text', {
+            class: 'step-label-main',
+            x: p.x + p.w / 2, y: p.y + p.h / 2 + 6,
+            'text-anchor': 'middle',
+            'font-size': 16,
+          });
+          label.textContent = s.label;
+          g.appendChild(label);
+        }
+
+        g.addEventListener('click', () => openStepPanel(s.id));
+        boxLayer.appendChild(g);
+      }
+    }
+
+    function appendEdgeLabel(layer, formatId, cx, cy) {
+      const fmt = FMT_BY_ID[formatId];
+      const labelText = fmt?.label ?? formatId;
+      const labelGroup = svgEl('g', { class: 'edge-label-group' });
+      const bg  = svgEl('rect', { class: 'edge-label-bg', rx: 4, ry: 4 });
+      const txt = svgEl('text', { class: 'edge-label-text', x: cx, y: cy });
+      txt.textContent = labelText;
+      labelGroup.appendChild(bg);
+      labelGroup.appendChild(txt);
+      labelGroup.addEventListener('click', () => openFormatPanel(formatId));
+      layer.appendChild(labelGroup);
+
+      requestAnimationFrame(() => {
+        const bb = txt.getBBox();
+        const padX = 10, padY = 4;
+        bg.setAttribute('x', bb.x - padX);
+        bg.setAttribute('y', bb.y - padY);
+        bg.setAttribute('width',  bb.width  + padX * 2);
+        bg.setAttribute('height', bb.height + padY * 2);
+      });
+    }
+
+    function toolSubline(names) {
+      const short = names.map(n => n.replace(/\s*\([^)]*\)\s*$/, ''));
+      return short.join('  ·  ');
+    }
+
+    function svgEl(tag, attrs = {}) {
+      const node = document.createElementNS(SVG_NS, tag);
+      for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+      return node;
+    }
+
+    // ============ Zoom ============
+    //
+    // SVG renders at CONTENT_W × CONTENT_H × zoomLevel pixels. The
+    // map-wrap is overflow:auto, so the browser handles scrolling
+    // naturally; zoom just changes the rendered size.
+
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+    function applyZoom(z) {
+      zoomLevel = clamp(z, MIN_ZOOM, MAX_ZOOM);
+      const svg = document.getElementById('pipeline');
+      svg.setAttribute('width',  CONTENT_W * zoomLevel);
+      svg.setAttribute('height', CONTENT_H * zoomLevel);
+    }
+
+    function fitZoom() {
+      const wrap = document.getElementById('map-wrap');
+      const sx = (wrap.clientWidth  - 24) / CONTENT_W;
+      const sy = (wrap.clientHeight - 24) / CONTENT_H;
+      return clamp(Math.min(sx, sy), MIN_ZOOM, 1);
+    }
+
+    // Zoom while keeping the (anchorX, anchorY) point — given in
+    // map-wrap viewport coords — stable under the cursor.
+    function setZoomAroundPoint(newZoom, anchorX, anchorY) {
+      const wrap = document.getElementById('map-wrap');
+      const oldZoom = zoomLevel;
+      const clamped = clamp(newZoom, MIN_ZOOM, MAX_ZOOM);
+      if (clamped === oldZoom) return;
+      const cx = (wrap.scrollLeft + anchorX) / oldZoom;
+      const cy = (wrap.scrollTop  + anchorY) / oldZoom;
+      applyZoom(clamped);
+      wrap.scrollLeft = cx * zoomLevel - anchorX;
+      wrap.scrollTop  = cy * zoomLevel - anchorY;
+    }
+
+    function wireZoom() {
+      const wrap = document.getElementById('map-wrap');
+
+      // ---- Wheel / trackpad: zoom, cursor-anchored, gentle step.
+      const WHEEL_STEP = 1.05;
+      wrap.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const rect = wrap.getBoundingClientRect();
+        const ax = e.clientX - rect.left;
+        const ay = e.clientY - rect.top;
+        const factor = e.deltaY < 0 ? WHEEL_STEP : 1 / WHEEL_STEP;
+        setZoomAroundPoint(zoomLevel * factor, ax, ay);
+      }, { passive: false });
+
+      // ---- Click & drag empty space: pan.
+      let dragging = false;
+      let dragStart = null;
+      wrap.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest('.step-group, .edge-label-group')) return;
+        dragging = true;
+        dragStart = {
+          x: e.clientX, y: e.clientY,
+          scrollLeft: wrap.scrollLeft,
+          scrollTop:  wrap.scrollTop,
+        };
+        wrap.classList.add('dragging');
+        e.preventDefault();
+      });
+      window.addEventListener('mousemove', (e) => {
+        if (!dragging) return;
+        wrap.scrollLeft = dragStart.scrollLeft - (e.clientX - dragStart.x);
+        wrap.scrollTop  = dragStart.scrollTop  - (e.clientY - dragStart.y);
+      });
+      window.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        wrap.classList.remove('dragging');
+      });
+
+      // ---- Initial view: natural zoom, scrolled to the start of the
+      //      pipeline so NGS sequencing is at the left edge.
+      requestAnimationFrame(() => {
+        applyZoom(1);
+        wrap.scrollLeft = 0;
+        wrap.scrollTop  = 0;
+      });
+    }
+
+    // ============ Panel ============
+
+    function wirePanel() {
+      document.getElementById('panel-close').addEventListener('click', closePanel);
+      document.getElementById('panel-backdrop').addEventListener('click', closePanel);
+      window.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closePanel();
+      });
+    }
+
+    function openPanel(buildContent) {
+      const content = document.getElementById('panel-content');
+      content.innerHTML = '';
+      buildContent(content);
+      document.getElementById('panel').classList.add('open');
+      document.getElementById('panel-backdrop').classList.add('open');
+      document.getElementById('panel').setAttribute('aria-hidden', 'false');
+      content.scrollTop = 0;
+    }
+
+    function closePanel() {
+      document.getElementById('panel').classList.remove('open');
+      document.getElementById('panel-backdrop').classList.remove('open');
+      document.getElementById('panel').setAttribute('aria-hidden', 'true');
+    }
+
+    function h(tag, opts = {}, children = []) {
+      const node = document.createElement(tag);
+      if (opts.class) node.className = opts.class;
+      if (opts.text != null) node.textContent = opts.text;
+      if (opts.href) node.href = opts.href;
+      if (opts.target) node.target = opts.target;
+      if (opts.rel) node.rel = opts.rel;
+      if (opts.onclick) node.addEventListener('click', opts.onclick);
+      for (const c of children) if (c) node.appendChild(c);
+      return node;
+    }
+
+    function openStepPanel(stepId) {
+      const step = STEP_BY_ID[stepId];
+      if (!step) return;
+
+      openPanel((root) => {
+        root.appendChild(h('div', { class: 'panel-eyebrow', text: 'PIPELINE STEP' }));
+        root.appendChild(h('h1',  { class: 'panel-title',   text: step.label }));
+
+        if (step.goal) {
+          root.appendChild(h('div', { class: 'panel-section-h', text: 'GOAL' }));
+          root.appendChild(h('p',   { class: 'panel-body',      text: cleanText(step.goal) }));
+        }
+
+        if (step.inputs?.length) {
+          root.appendChild(h('div', { class: 'panel-section-h', text: 'INPUTS' }));
+          root.appendChild(formatChips(step.inputs));
+        }
+        if (step.outputs?.length) {
+          root.appendChild(h('div', { class: 'panel-section-h', text: 'OUTPUTS' }));
+          root.appendChild(formatChips(step.outputs));
+        }
+
+        root.appendChild(h('div', { class: 'panel-section-h', text: 'TOOLS' }));
+        if (step.tools?.length) {
+          for (const tid of step.tools) {
+            const tool = TOOL_BY_ID[tid];
+            if (!tool) continue;
+
+            const labelChildren = [document.createTextNode(tool.label)];
+            if (tool.url) {
+              labelChildren.push(h('span', { class: 'tool-link-arrow', text: '↗' }));
+            }
+
+            const inner = [
+              h('div', { class: 'tool-entry-label' }, labelChildren),
+              tool.one_line
+                ? h('p', { class: 'tool-entry-one-line', text: tool.one_line })
+                : null,
+            ];
+
+            if (tool.url) {
+              root.appendChild(h('a', {
+                class: 'tool-entry',
+                href: tool.url, target: '_blank', rel: 'noopener',
+              }, inner));
+            } else {
+              root.appendChild(h('div', { class: 'tool-entry' }, inner));
+            }
+          }
+        } else {
+          root.appendChild(h('div', {
+            class: 'tool-entry-none',
+            text: '(No tool — upstream / aggregation step.)',
+          }));
+        }
+      });
+    }
+
+    function openFormatPanel(formatId) {
+      const fmt = FMT_BY_ID[formatId];
+      if (!fmt) return;
+
+      openPanel((root) => {
+        root.appendChild(h('div', { class: 'panel-eyebrow', text: 'FILE FORMAT' }));
+        root.appendChild(h('h1',  { class: 'panel-title',   text: fmt.label }));
+
+        if (fmt.extensions?.length) {
+          const wrap = h('div');
+          for (const ext of fmt.extensions) {
+            wrap.appendChild(h('span', { class: 'chip', text: ext }));
+          }
+          root.appendChild(wrap);
+        }
+
+        if (fmt.description) {
+          root.appendChild(h('div', { class: 'panel-section-h', text: 'WHAT IT IS' }));
+          root.appendChild(h('p',   { class: 'panel-body',      text: cleanText(fmt.description) }));
+        }
+        if (fmt.holds) {
+          root.appendChild(h('div', { class: 'panel-section-h', text: 'WHAT IT HOLDS' }));
+          root.appendChild(h('p',   { class: 'panel-body',      text: cleanText(fmt.holds) }));
+        }
+        if (fmt.example) {
+          root.appendChild(h('div', { class: 'panel-section-h', text: 'HOW IT LOOKS' }));
+          root.appendChild(h('pre', { class: 'code-block',      text: fmt.example }));
+        }
+      });
+    }
+
+    function formatChips(formatIds) {
+      const wrap = h('div');
+      for (const fid of formatIds) {
+        const fmt = FMT_BY_ID[fid];
+        wrap.appendChild(h('span', {
+          class: 'chip chip-link',
+          text: fmt?.label ?? fid,
+          onclick: () => openFormatPanel(fid),
+        }));
+      }
+      return wrap;
+    }
+
+    function cleanText(s) {
+      return String(s).replace(/\s+/g, ' ').trim();
     }
 
     main();

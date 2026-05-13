@@ -1,0 +1,475 @@
+# CSE 185 Bioinformatics Pipeline Map — data model (v4)
+#
+# Scope: tools and steps covered in CSE 185 labs through Lab 6,
+# plus NGS as the one upstream node for orientation.
+# Audience: students who have learned the material and want a mental map
+# of what each tool does and where it sits in the natural research flow.
+# Flow direction: left-to-right (renderer concern, recorded here for reference).
+#
+# Field guide:
+#   steps[].type      — transform: produces data the next step consumes
+#                       analysis : evaluation / readout, does not feed the mainline
+#   steps[].mainline  — true: on the trunk (visually prominent)
+#                       false: side-track (analysis), render as panel/footnote
+#   file_formats[]    — typed edge alphabet. One entry per *file format*,
+#                       not per *semantic use*: FASTA is FASTA whether it
+#                       holds a reference, contigs, consensus, predicted
+#                       genes, or an MSA.
+#       .label        — name shown on the map
+#       .extensions   — common filename extensions
+#       .holds        — one-line answer to "what's in this file?"
+#       .description  — student-facing paragraph: what it is + what it's for
+#       .example      — raw snippet that looks like the actual file
+#   tools[]           — each tool gets one line + a URL where one exists.
+
+meta:
+  course: "CSE 185 — Advanced Bioinformatics Lab (UCSD)"
+  flow_direction: "left-to-right"
+  audience: "Students seeking a mental map of tools and pipeline positions."
+
+# ===========================================================================
+# FILE FORMATS — the typed edges between steps.
+# ===========================================================================
+file_formats:
+  - id: dna_fragments
+    label: "DNA fragments"
+    extensions: []
+    holds: "The wet-lab sample going into the sequencer."
+    description: >
+      A library of fragmented (and often adapter-ligated) DNA molecules
+      from a biological sample. Not a digital file — included as the
+      wet-lab / dry-lab boundary marker.
+
+  - id: fastq
+    label: "FASTQ"
+    extensions: [".fastq", ".fq", ".fastq.gz", ".fq.gz"]
+    holds: "Reads + per-base quality scores."
+    description: >
+      Plain-text format for sequencing reads (raw or trimmed). Each read
+      takes exactly 4 lines: an `@`-prefixed identifier, the nucleotide
+      sequence, a `+` separator, and per-base Phred quality scores
+      encoded as ASCII characters. The standard output of every
+      short-read sequencer (Illumina, etc.).
+    example: |
+      @SRR1553606.1
+      GATGTACGAGTAGCATGATCGATCAGCTGATCGA
+      +
+      IIIIIIHHHHGGGFFFEEDDDCCCBBBAAAAA@@
+
+  - id: fasta
+    label: "FASTA"
+    extensions: [".fasta", ".fa", ".fna", ".faa", ".aln"]
+    holds: "Named sequences (DNA, RNA, or protein)."
+    description: >
+      Plain-text format for one or more named biological sequences.
+      Each record begins with a `>` header line followed by sequence
+      lines. Used throughout the course for references, assembly
+      contigs, consensus genomes, predicted genes, multi-sample
+      collections, and multiple-sequence alignments (which simply
+      contain `-` characters at gap positions).
+    example: |
+      >chr1 reference genome
+      ATGCATCGATCGATCGATCGATCGATCGATCGAT
+      CGATCGATCGATCGATCGATCGATCGATCGATCG
+      >chr2
+      ATGCGATCGATCGATCGATC...
+
+  - id: sam
+    label: "SAM"
+    extensions: [".sam"]
+    holds: "Read alignments to a reference."
+    description: >
+      Sequence Alignment/Map format. Plain-text record of where each
+      read aligned in a reference, plus alignment details (CIGAR
+      string, flags, mapping quality, mate info). Each data row is
+      one alignment; columns are QNAME, FLAG, RNAME, POS, MAPQ,
+      CIGAR, RNEXT, PNEXT, TLEN, SEQ, QUAL.
+    example: |
+      @HD  VN:1.6  SO:coordinate
+      @SQ  SN:chr1 LN:5000
+      r1  0  chr1  100  60  35M  *  0  0  ATGCATCGATCGATCG...  IIIIIIIIIIIIIII...
+
+  - id: bam
+    label: "BAM"
+    extensions: [".bam", ".bam.bai"]
+    holds: "Read alignments (binary), usually sorted + indexed."
+    description: >
+      Binary, BGZF-compressed version of SAM — same content, smaller
+      and faster. Most downstream tools require it sorted by coordinate
+      and accompanied by a `.bai` index file so they can jump to a
+      region without scanning the whole file.
+    example: |
+      (Binary on disk; same content as SAM. Read with `samtools view`:)
+      $ samtools view sorted.bam | head -1
+      r1  0  chr1  100  60  35M  *  0  0  ATGC...  IIII...
+
+  - id: vcf
+    label: "VCF"
+    extensions: [".vcf", ".vcf.gz"]
+    holds: "Differences between samples and a reference."
+    description: >
+      Variant Call Format. Plain-text record of positions where one or
+      more samples differ from a reference. Header lines start with
+      `##`; data rows give CHROM, POS, ID, REF, ALT, QUAL, FILTER,
+      INFO, plus per-sample genotype columns.
+    example: |
+      ##fileformat=VCFv4.2
+      ##contig=<ID=chr1,length=5000>
+      #CHROM  POS    ID  REF  ALT  QUAL  FILTER  INFO
+      chr1    1234   .   A    G    99    PASS    DP=42;AF=0.95
+      chr1    5678   .   C    T    87    PASS    DP=38;AF=0.42
+
+  - id: gff
+    label: "GFF"
+    extensions: [".gff", ".gff3"]
+    holds: "Coordinates of features on a reference."
+    description: >
+      General Feature Format. Tab-separated coordinates of features
+      (genes, exons, CDS, etc.) on a reference sequence. One feature
+      per row. Produced by gene predictors and used by genome browsers
+      and annotation tools.
+    example: |
+      ##gff-version 3
+      chr1  prodigal  CDS  100   450   .  +  0  ID=gene_1;product=hypothetical
+      chr1  prodigal  CDS  500   1200  .  -  0  ID=gene_2
+
+  - id: newick
+    label: "Newick"
+    extensions: [".nwk", ".tree", ".treefile"]
+    holds: "An evolutionary tree."
+    description: >
+      A phylogeny written as a recursive parenthesized string. Internal
+      nodes contain comma-separated children; numbers after `:` are
+      branch lengths (typically in substitutions per site). The standard
+      output of phylogenetic inference.
+    example: |
+      ((sampleA:0.012,sampleB:0.008):0.003,(sampleC:0.015,sampleD:0.022):0.005);
+
+  - id: qc_report
+    label: "QC report"
+    extensions: [".html", ".json", ".svg", ".tsv"]
+    holds: "Quality metrics for inspection."
+    description: >
+      A human-readable quality report. Specific format depends on the
+      tool (Quack → SVG; fastp → HTML + JSON; QUAST → HTML + TSV).
+      Used by the analyst to decide trim parameters, sanity-check
+      assembly quality, etc. Not consumed by downstream tools.
+    example: |
+      (fastp JSON excerpt)
+      {
+        "summary": {
+          "before_filtering": {"total_reads": 1234567, "q30_rate": 0.85},
+          "after_filtering":  {"total_reads": 1230000, "q30_rate": 0.92}
+        }
+      }
+
+  - id: stats_table
+    label: "Stats table"
+    extensions: [".tsv", ".csv"]
+    holds: "Numerical metrics in a table."
+    description: >
+      Tabular numerical output (mapping stats, branch lengths, etc.).
+      For inspection or plotting, not downstream tool input.
+    example: |
+      SN  raw total sequences:  1234567
+      SN  reads mapped:         1200000
+      SN  error rate:           0.0021
+      SN  insert size average:  315
+
+# ===========================================================================
+# STEPS — pipeline nodes.
+# ===========================================================================
+steps:
+  - id: sequence_sample
+    label: "NGS sequencing"
+    type: transform
+    mainline: true
+    upstream_context: true
+    goal: >
+      Convert a biological sample (DNA fragments) into machine-readable
+      reads with per-base quality scores.
+    inputs: [dna_fragments]
+    outputs: [fastq]
+    tools: []
+    note: >
+      Upstream of CSE 185 — no specific tool node from the course goes
+      here. Included as the root for orientation.
+
+  - id: qc_reads
+    label: "Quality control reads"
+    type: analysis
+    mainline: true
+    goal: >
+      Visualize per-base quality, length distribution, and adapter
+      content of the raw reads. The report informs the next step's
+      (trimming) parameters.
+    inputs: [fastq]
+    outputs: [fastq]
+    tools: [quack]
+    note: >
+      Quack itself only writes a QC report — the FASTQ "output" here
+      is conceptual: the same raw reads pass through to trimming.
+      Shown linearly because QC precedes trimming in the workflow.
+      QC-report output omitted from the map to keep the QC → trim
+      handoff visually clean.
+
+  - id: trim_reads
+    label: "Trim adapter & low-quality bases"
+    type: transform
+    mainline: true
+    goal: >
+      Remove adapter sequences and trim low-quality bases (typically
+      at the 3' end) before downstream analysis. Better trimming →
+      cleaner mapping and cleaner assembly.
+    inputs: [fastq]
+    outputs: [fastq, qc_report]
+    tools: [fastp]
+
+  - id: genome_assembly
+    label: "Genome assembly (de novo)"
+    type: transform
+    mainline: true
+    goal: >
+      Reconstruct a draft genome from reads alone, without a reference,
+      using de Bruijn graph methods.
+    inputs: [fastq]
+    outputs: [fasta]
+    tools: [spades]
+
+  - id: assembly_qc
+    label: "Assess assembly quality"
+    type: analysis
+    mainline: true
+    goal: >
+      Quantify contiguity and completeness of the draft assembly
+      (N50, # contigs, total length, possible misassemblies).
+    inputs: [fasta]
+    outputs: [qc_report]
+    tools: [quast]
+
+  - id: predict_genes
+    label: "Predict & annotate genes"
+    type: transform
+    mainline: true
+    goal: >
+      Find open reading frames (ORFs) in the assembled genome and
+      emit both nucleotide and translated protein sequences.
+    inputs: [fasta]
+    outputs: [gff, fasta]
+    tools: [prodigal]
+
+  - id: read_mapping
+    label: "Read mapping"
+    type: transform
+    mainline: true
+    goal: >
+      Align reads against a known reference genome to find where
+      each read came from.
+    inputs: [fastq, fasta]
+    outputs: [sam]
+    tools: [bowtie2, bwa, hisat2, minimap2]
+
+  - id: sort_index_bam
+    label: "Sort & index BAM"
+    type: transform
+    mainline: true
+    goal: >
+      Convert SAM to BAM, coordinate-sort alignments, and build a
+      .bai index so downstream tools can query specific regions
+      without scanning the whole file.
+    inputs: [sam]
+    outputs: [bam]
+    tools: [samtools_sort_index]
+
+  - id: mapping_stats
+    label: "Mapping stats"
+    type: analysis
+    mainline: false
+    goal: >
+      Summarize mapping rate, depth, insert size, mismatch rate,
+      and other QC metrics for the aligned reads.
+    inputs: [bam]
+    outputs: [stats_table]
+    tools: [samtools_stats]
+    rendered_under: sort_index_bam
+
+  - id: build_consensus
+    label: "Build consensus sequence"
+    type: transform
+    mainline: true
+    goal: >
+      Collapse the mapped reads into a single best-guess genome
+      sequence for this sample (majority vote at each position).
+    inputs: [sam, fasta]
+    outputs: [fasta]
+    tools: [viral_consensus]
+
+  - id: call_variants
+    label: "Call variants"
+    type: transform
+    mainline: true
+    goal: >
+      Identify positions where this sample differs from the reference,
+      with allele frequencies and per-call quality.
+    inputs: [bam, fasta]
+    outputs: [vcf]
+    tools: [lofreq, freebayes]
+
+  - id: msa
+    label: "Multiple sequence alignment (MSA)"
+    type: transform
+    mainline: true
+    goal: >
+      Align many sequences (typically consensus genomes from many
+      samples) so that homologous positions sit in the same column.
+      The starting point for any cross-sample comparative analysis.
+    inputs: [fasta]
+    outputs: [fasta]
+    tools: [mafft, viralmsa]
+
+  - id: infer_phylogeny
+    label: "Infer phylogeny"
+    type: transform
+    mainline: true
+    goal: >
+      Build a tree of evolutionary relationships from the MSA.
+      Branch lengths are in mutation units. Tree is typically unrooted.
+    inputs: [fasta]
+    outputs: [newick]
+    tools: [fasttree, iqtree, raxml_ng]
+
+  - id: terminal_branch_lengths
+    label: "Terminal branch lengths"
+    type: analysis
+    mainline: false
+    goal: >
+      Print the branch length leading to each leaf in the tree.
+    inputs: [newick]
+    outputs: [stats_table]
+    tools: [nw_distance]
+    rendered_under: infer_phylogeny
+
+# ===========================================================================
+# TOOLS — referenced by id from steps[].tools.
+# Each tool has a one-liner and a documentation URL.
+# ===========================================================================
+tools:
+  - id: quack
+    label: "Quack"
+    url: "https://github.com/IGBB/quack"
+    one_line: "FASTQ quality visualization as a single self-contained report."
+
+  - id: fastp
+    label: "fastp"
+    url: "https://github.com/OpenGene/fastp"
+    one_line: "Fast all-in-one FASTQ trimmer; emits trimmed reads plus HTML + JSON QC reports."
+
+  - id: spades
+    label: "SPAdes"
+    url: "https://ablab.github.io/spades"
+    one_line: "de Bruijn graph short-read genome assembler."
+
+  - id: quast
+    label: "QUAST"
+    url: "https://quast.sourceforge.net"
+    one_line: "Assembly quality metrics — N50, # contigs, total length, misassemblies."
+
+  - id: prodigal
+    label: "Prodigal"
+    url: "https://github.com/hyattpd/Prodigal"
+    one_line: "Prokaryotic gene prediction. Outputs GFF + nucleotide FASTA + protein FASTA."
+
+  - id: bowtie2
+    label: "Bowtie2"
+    url: "https://github.com/BenLangmead/bowtie2"
+    one_line: "Short-read aligner. Build an index first, then map."
+
+  - id: bwa
+    label: "BWA (BWA-MEM)"
+    url: "https://github.com/lh3/bwa"
+    one_line: "Burrows-Wheeler short-read aligner. Build an index first, then map."
+
+  - id: hisat2
+    label: "HISAT2"
+    url: "https://daehwankimlab.github.io/hisat2"
+    one_line: "Splice-aware short-read aligner (good for RNA-seq). Requires an index."
+
+  - id: minimap2
+    label: "minimap2"
+    url: "https://lh3.github.io/minimap2"
+    one_line: "Versatile aligner — short reads, long reads, ref-to-ref. No separate index step."
+
+  - id: samtools_sort_index
+    label: "samtools sort + index"
+    url: "https://www.htslib.org/doc/samtools.html"
+    one_line: "Coordinate-sort a SAM/BAM and produce a .bai index for random access."
+
+  - id: samtools_stats
+    label: "samtools stats"
+    url: "https://www.htslib.org/doc/samtools-stats.html"
+    one_line: "Summary statistics for a SAM/BAM file (mapping rate, depth, error metrics)."
+
+  - id: viral_consensus
+    label: "ViralConsensus"
+    url: "https://github.com/niemasd/ViralConsensus"
+    one_line: "Consensus calling for short (viral) genomes directly from SAM/BAM."
+
+  - id: lofreq
+    label: "LoFreq"
+    url: "https://csb5.github.io/lofreq"
+    one_line: "Low-frequency variant caller with Dindel mode for indel qualities. Suited to viral populations."
+
+  - id: freebayes
+    label: "freebayes"
+    url: "https://github.com/freebayes/freebayes"
+    one_line: "Haplotype-aware Bayesian variant caller; ploidy is configurable."
+
+  - id: mafft
+    label: "MAFFT"
+    url: "https://mafft.cbrc.jp"
+    one_line: "Progressive MSA with FFT-based similarity estimation. General-purpose."
+
+  - id: viralmsa
+    label: "ViralMSA"
+    url: "https://github.com/niemasd/ViralMSA"
+    one_line: "Reference-guided MSA — every sequence aligned to one reference. Very fast on large datasets."
+
+  - id: fasttree
+    label: "FastTree"
+    url: "https://morgannprice.github.io/fasttree"
+    one_line: "Approximately-maximum-likelihood phylogenies for large alignments."
+
+  - id: iqtree
+    label: "IQ-TREE"
+    url: "http://www.iqtree.org"
+    one_line: "Full ML phylogenetic inference with model selection. (Use the `iqtree2` executable.)"
+
+  - id: raxml_ng
+    label: "RAxML-NG"
+    url: "https://github.com/amkozlov/raxml-ng"
+    one_line: "Randomized accelerated maximum-likelihood tree search."
+
+  - id: nw_distance
+    label: "nw_distance (Newick Utilities)"
+    url: "https://github.com/tjunier/newick_utils"
+    one_line: "Print node-to-node distances within a Newick tree."
+
+# ===========================================================================
+# EDGES — explicit, one per file-format flow between two steps.
+# ===========================================================================
+edges:
+  - {from: sequence_sample, to: qc_reads,                format: fastq}
+  - {from: qc_reads,        to: trim_reads,              format: fastq}
+  - {from: trim_reads,      to: genome_assembly,         format: fastq}
+  - {from: trim_reads,      to: read_mapping,            format: fastq}
+  - {from: genome_assembly, to: assembly_qc,             format: fasta}
+  - {from: genome_assembly, to: predict_genes,           format: fasta}
+  - {from: read_mapping,    to: sort_index_bam,          format: sam}
+  - {from: read_mapping,    to: build_consensus,         format: sam,
+     note: "ViralConsensus consumes SAM directly — no sort/index needed."}
+  - {from: sort_index_bam,  to: mapping_stats,           format: bam}
+  - {from: sort_index_bam,  to: call_variants,           format: bam}
+  - {from: build_consensus, to: msa,                     format: fasta,
+     note: "Aggregate many single-sample consensus FASTAs into one multi-FASTA before MSA."}
+  - {from: msa,             to: infer_phylogeny,         format: fasta}
+  - {from: infer_phylogeny, to: terminal_branch_lengths, format: newick}

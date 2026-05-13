@@ -3,3 +3,4 @@ input/
 node_modules/
 *.log
 dist/
+CLAUDE.md
