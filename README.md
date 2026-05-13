@@ -8,14 +8,7 @@ the file holds and a sample snippet. Pan with click-drag, zoom with
 wheel or trackpad. Scope is currently Labs 1–6 plus NGS as the
 upstream anchor.
 
-## Run locally
-
-It's a static page that fetches YAML at load time, so use a server
-(not `file://`):
-
-    python3 -m http.server 8000
-
-Then open <http://localhost:8000/>.
+Open it at <https://ayjz.github.io/cse185-map/>.
 
 ## Data
 
