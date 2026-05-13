@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>CSE 185 Pipeline Map</title>
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; }
+    #pipeline { display: block; }
+    #status { padding: 12px; color: #a00; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <div id="status"></div>
+  <svg id="pipeline" xmlns="http://www.w3.org/2000/svg"></svg>
+
+  <script>
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+
+    async function main() {
+      let data;
+      try {
+        const res = await fetch('data/pipeline.yaml');
+        if (!res.ok) throw new Error(`fetch ${res.status}`);
+        data = jsyaml.load(await res.text());
+      } catch (err) {
+        document.getElementById('status').textContent =
+          `Failed to load data/pipeline.yaml: ${err.message}`;
+        return;
+      }
+      render(data);
+    }
+
+    function render(data) {
+      const mainline = data.steps.filter(s => s.mainline);
+      const mainlineIds = new Set(mainline.map(s => s.id));
+      const edges = data.edges.filter(
+        e => mainlineIds.has(e.from) && mainlineIds.has(e.to)
+      );
+      const fmtById = Object.fromEntries(
+        data.file_formats.map(f => [f.id, f])
+      );
+
+      // Longest-path level from any root: column index.
+      const level = {};
+      mainline.forEach(s => { level[s.id] = 0; });
+      let changed = true;
+      while (changed) {
+        changed = false;
+        for (const e of edges) {
+          const next = level[e.from] + 1;
+          if (next > level[e.to]) {
+            level[e.to] = next;
+            changed = true;
+          }
+        }
+      }
+
+      // Group by level, stable order from steps[] declaration order.
+      const byLevel = {};
+      mainline.forEach(s => {
+        const l = level[s.id];
+        (byLevel[l] ||= []).push(s);
+      });
+
+      // Layout constants.
+      const COL_W = 280, ROW_H = 110;
+      const BOX_W = 220, BOX_H = 56;
+      const PAD_X = 40, PAD_Y = 40;
+
+      // Position each box.
+      const pos = {};
+      for (const [l, steps] of Object.entries(byLevel)) {
+        steps.forEach((s, i) => {
+          pos[s.id] = {
+            x: PAD_X + Number(l) * COL_W,
+            y: PAD_Y + i * ROW_H,
+            w: BOX_W,
+            h: BOX_H,
+          };
+        });
+      }
+
+      const maxLevel = Math.max(...Object.values(level));
+      const maxRows  = Math.max(...Object.values(byLevel).map(a => a.length));
+      const svgW = PAD_X * 2 + (maxLevel + 1) * COL_W;
+      const svgH = PAD_Y * 2 + maxRows * ROW_H;
+
+      const svg = document.getElementById('pipeline');
+      svg.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
+      svg.setAttribute('width', svgW);
+      svg.setAttribute('height', svgH);
+
+      // Draw edges first so boxes overlay them.
+      // All edges sharing a source originate from the source box's
+      // right-center point — that gives the "fan-out from one node" look.
+      for (const e of edges) {
+        const s = pos[e.from], t = pos[e.to];
+        const x1 = s.x + s.w;
+        const y1 = s.y + s.h / 2;
+        const x2 = t.x;
+        const y2 = t.y + t.h / 2;
+
+        const line = document.createElementNS(SVG_NS, 'line');
+        line.setAttribute('x1', x1);
+        line.setAttribute('y1', y1);
+        line.setAttribute('x2', x2);
+        line.setAttribute('y2', y2);
+        line.setAttribute('stroke', '#888');
+        line.setAttribute('stroke-width', '1');
+        svg.appendChild(line);
+
+        const label = document.createElementNS(SVG_NS, 'text');
+        label.setAttribute('x', (x1 + x2) / 2);
+        label.setAttribute('y', (y1 + y2) / 2 - 4);
+        label.setAttribute('text-anchor', 'middle');
+        label.setAttribute('font-size', '11');
+        label.setAttribute('fill', '#555');
+        label.textContent = fmtById[e.format]?.label ?? e.format;
+        svg.appendChild(label);
+      }
+
+      // Draw boxes.
+      for (const s of mainline) {
+        const p = pos[s.id];
+        const rect = document.createElementNS(SVG_NS, 'rect');
+        rect.setAttribute('x', p.x);
+        rect.setAttribute('y', p.y);
+        rect.setAttribute('width', p.w);
+        rect.setAttribute('height', p.h);
+        rect.setAttribute('fill', '#fff');
+        rect.setAttribute('stroke', '#333');
+        rect.setAttribute('stroke-width', '1');
+        svg.appendChild(rect);
+
+        const text = document.createElementNS(SVG_NS, 'text');
+        text.setAttribute('x', p.x + p.w / 2);
+        text.setAttribute('y', p.y + p.h / 2 + 4);
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('font-size', '13');
+        text.textContent = s.label;
+        svg.appendChild(text);
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>
