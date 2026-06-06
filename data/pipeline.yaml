@@ -304,8 +304,6 @@ steps:
     outputs: [fastq]
     tools: []
     note: >
-      Upstream of CSE 185 — no specific tool node from the course goes
-      here. Included as the root for orientation.
 
   - id: qc_reads
     label: "Quality control reads"
