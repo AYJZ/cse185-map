@@ -6,11 +6,7 @@
 # the one upstream node for orientation. The RNA-seq branch is
 # additionally carried PAST the labs into a standard downstream
 # analysis pipeline (read counting → normalization → sample QC →
-# differential expression → enrichment) so students see where Lab 9
-# leads; every such node carries a "beyond the labs" note.
-# A few in-course endpoints are student-written Python scripts
-# (clustering, RPKM/TPM): these appear as no-tool position nodes
-# (tools: []) — never named as "tools".
+# differential expression → enrichment).
 # Audience: students who have learned the material and want a mental map
 # of what each tool does and where it sits in the natural research flow.
 # Flow direction: left-to-right (renderer concern, recorded here for reference).
