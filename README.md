@@ -5,8 +5,12 @@ Advanced Bioinformatics Lab). Each box is a step; the pills on the
 lines are the file formats that pass between them. Click a box for
 the step's goal, inputs/outputs, and tools; click a pill for what
 the file holds and a sample snippet. Pan with click-drag, zoom with
-wheel or trackpad. Scope is currently Labs 1–6 plus NGS as the
-upstream anchor.
+wheel or trackpad. Scope is Labs 1–9 (assembly, mapping,
+consensus/variants, MSA, phylogeny, tree dating, molecular
+clustering, RNA-seq) plus NGS as the upstream anchor. The RNA-seq
+branch runs end-to-end into a standard downstream pipeline (counting
+→ normalization → QC → differential expression → enrichment); nodes
+past the labs are marked "beyond the CSE 185 labs" in their details.
 
 Open it at <https://ayjz.github.io/cse185-map/>.
 

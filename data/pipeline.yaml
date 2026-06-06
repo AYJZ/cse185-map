@@ -1,7 +1,16 @@
-# CSE 185 Bioinformatics Pipeline Map — data model (v4)
+# CSE 185 Bioinformatics Pipeline Map — data model (v5)
 #
-# Scope: tools and steps covered in CSE 185 labs through Lab 6,
-# plus NGS as the one upstream node for orientation.
+# Scope: tools and steps covered in CSE 185 labs through Lab 9
+# (assembly, mapping, consensus/variants, MSA, phylogeny, tree
+# dating, molecular clustering, RNA-seq quantification), plus NGS as
+# the one upstream node for orientation. The RNA-seq branch is
+# additionally carried PAST the labs into a standard downstream
+# analysis pipeline (read counting → normalization → sample QC →
+# differential expression → enrichment) so students see where Lab 9
+# leads; every such node carries a "beyond the labs" note.
+# A few in-course endpoints are student-written Python scripts
+# (clustering, RPKM/TPM): these appear as no-tool position nodes
+# (tools: []) — never named as "tools".
 # Audience: students who have learned the material and want a mental map
 # of what each tool does and where it sits in the natural research flow.
 # Flow direction: left-to-right (renderer concern, recorded here for reference).
@@ -176,6 +185,109 @@ file_formats:
       SN  error rate:           0.0021
       SN  insert size average:  315
 
+  - id: gtf
+    label: "GTF"
+    extensions: [".gtf"]
+    holds: "Gene models annotated on a reference genome."
+    description: >
+      Gene Transfer Format — a tab-delimited annotation of gene,
+      transcript, and exon features on a reference sequence (a close
+      relative of GFF). Read alongside the reference FASTA so a
+      splice-aware aligner knows where genes and splice junctions sit
+      when it builds its index.
+    example: |
+      chr1  ensembl  gene        1000  9000  .  +  .  gene_id "G1";
+      chr1  ensembl  transcript  1000  9000  .  +  .  gene_id "G1"; transcript_id "T1";
+      chr1  ensembl  exon        1000  1200  .  +  .  gene_id "G1"; transcript_id "T1";
+
+  - id: pairwise_distances
+    label: "Pairwise distances"
+    extensions: [".txt", ".csv"]
+    holds: "A genetic distance for every pair of sequences."
+    description: >
+      A table with one row per pair of sequences and the genetic
+      distance between them (e.g. under the TN93 substitution model).
+      Used to build the linkage network whose connected components are
+      the molecular clusters.
+    example: |
+      ID1,ID2,Distance
+      Sequence 1,Sequence 2,0.01
+      Sequence 1,Sequence 3,0.02
+      Sequence 2,Sequence 3,0.02
+
+  - id: abundance_table
+    label: "Abundance table"
+    extensions: [".sf", ".tsv"]
+    holds: "Estimated expression for each transcript."
+    description: >
+      Per-transcript quantification: estimated read counts plus a
+      length-normalized abundance (e.g. TPM) for every transcript in
+      the reference. Salmon writes `quant.sf`; kallisto writes
+      `abundance.tsv`.
+    example: |
+      Name        Length  EffectiveLength  TPM        NumReads
+      T1          1500    1320.5           857142.85  30000
+      T2          900     720.3            142857.14  5000
+
+  - id: count_matrix
+    label: "Count matrix"
+    extensions: [".tsv", ".csv"]
+    holds: "Reads (or estimated counts) per gene per sample."
+    description: >
+      A genes-by-samples table of read counts — the central data
+      structure for differential expression. Rows are genes (or
+      transcripts), columns are samples, cells are counts. Produced by
+      read counting (featureCounts / HTSeq) or imported from transcript
+      abundances, then normalized for library size before testing.
+    example: |
+      gene_id   sampleA   sampleB   sampleC
+      G1        842       910       1203
+      G2        15        22        9
+      G3        0         3         1
+
+  - id: de_results
+    label: "DE results table"
+    extensions: [".tsv", ".csv"]
+    holds: "Per-gene fold change and significance."
+    description: >
+      The output of a differential-expression test: one row per gene
+      with the log2 fold change between conditions, a p-value, and a
+      multiple-testing-adjusted p-value (e.g. Benjamini-Hochberg). The
+      ranked input to functional enrichment.
+    example: |
+      gene_id   log2FoldChange   pvalue     padj
+      G1        2.41             1.2e-08    3.4e-06
+      G2        -1.87            5.5e-05    2.1e-03
+      G3        0.04             0.91       0.98
+
+  - id: enrichment_results
+    label: "Enrichment table"
+    extensions: [".tsv", ".csv"]
+    holds: "Enriched pathways / gene sets with statistics."
+    description: >
+      The output of pathway or functional enrichment: gene sets (GO
+      terms, KEGG / Reactome pathways) that are over-represented or
+      coordinately shifted among the differentially expressed genes,
+      each with an enrichment score and an adjusted p-value.
+    example: |
+      term_id     description           NES    padj
+      GO:0006955  immune response       2.7    1e-05
+      hsa04060    cytokine signaling    2.1    4e-04
+
+  - id: sample_metadata
+    label: "Sample metadata"
+    extensions: [".txt", ".csv"]
+    holds: "Per-leaf collection dates and outgroup specs for dating."
+    description: >
+      Plain-text side files that annotate the tips of a tree: a
+      sampling date for each leaf, and which leaves form the outgroup.
+      LSD2 and TreeTime read these to root and time-scale a mutation
+      tree. Not sequence data — metadata about the samples.
+    example: |
+      sampleA  2021-03-14
+      sampleB  2021-04-02
+      sampleC  2021-05-20
+
 # ===========================================================================
 # STEPS — pipeline nodes.
 # ===========================================================================
@@ -222,7 +334,7 @@ steps:
       at the 3' end) before downstream analysis. Better trimming →
       cleaner mapping and cleaner assembly.
     inputs: [fastq]
-    outputs: [fastq, qc_report]
+    outputs: [fastq]
     tools: [fastp]
 
   - id: genome_assembly
@@ -349,6 +461,157 @@ steps:
     tools: [nw_distance]
     rendered_under: infer_phylogeny
 
+  - id: root_date_tree
+    label: "Root & date tree"
+    type: transform
+    mainline: true
+    goal: >
+      Outgroup-root the phylogeny and rescale it from mutation units
+      into time units, using each tip's sampling date. Turns a
+      mutation tree into a dated time tree.
+    inputs: [newick, sample_metadata]
+    outputs: [newick]
+    tools: [lsd2, treetime]
+    note: >
+      Input is an unrooted mutation tree (branch lengths in
+      mutations); output is a rooted time tree (branch lengths in
+      time). Tools also emit a NEXUS rendering of the dated tree
+      alongside the Newick.
+
+  - id: genetic_distances
+    label: "Pairwise genetic distances"
+    type: transform
+    mainline: true
+    goal: >
+      Compute the genetic distance between every pair of aligned
+      sequences — the raw material for clustering closely related
+      samples.
+    inputs: [fasta]
+    outputs: [pairwise_distances]
+    tools: [tn93]
+
+  - id: molecular_clustering
+    label: "Find molecular clusters"
+    type: analysis
+    mainline: true
+    goal: >
+      Group sequences into clusters by treating close pairs as links
+      and reading off the connected components of the resulting
+      network.
+    inputs: [pairwise_distances]
+    outputs: []
+    tools: []
+    note: >
+      N/A
+
+  - id: rnaseq_mapping
+    label: "RNA-seq read mapping"
+    type: transform
+    mainline: true
+    goal: >
+      Map RNA-seq reads to a reference genome in a splice-aware way, so
+      reads spanning exon-exon junctions align correctly.
+    inputs: [fastq, fasta, gtf]
+    outputs: [sam]
+    tools: [star, hisat2]
+    note: >
+      CSE 185 Lab 9. STAR and HISAT2 are both splice-aware. STAR indexes
+      the reference (FASTA + GTF) and writes the alignments to
+      Aligned.out.sam — the SAM that feeds read
+      counting.
+
+  - id: build_count_matrix
+    label: "Count reads per gene"
+    type: transform
+    mainline: true
+    goal: >
+      Turn the alignments (or transcript abundances) into a
+      genes-by-samples count matrix — the raw material for differential
+      expression. Both quantification routes converge here.
+    inputs: [sam, gtf, abundance_table]
+    outputs: [count_matrix]
+    tools: [featurecounts, htseq]
+    note: >
+      Standard downstream RNA-seq, beyond the CSE 185 labs. featureCounts
+      / HTSeq count reads per gene from STAR's Aligned.out.sam (using the
+      GTF); Salmon / kallisto abundances enter the same matrix via import
+      (e.g. tximport).
+
+  - id: quantify_transcripts
+    label: "Quantify transcripts"
+    type: transform
+    mainline: true
+    goal: >
+      Estimate how much each transcript is expressed directly from the
+      reads and a reference transcriptome, without a full alignment
+      step (alignment-free quantification).
+    inputs: [fastq, fasta]
+    outputs: [abundance_table]
+    tools: [salmon, kallisto]
+
+  - id: normalize_counts
+    label: "Normalize counts"
+    type: transform
+    mainline: true
+    goal: >
+      Put samples on a comparable scale before testing — correcting
+      for differences in sequencing depth (and, for within-sample
+      comparison, gene length). Both quantification routes converge
+      here.
+    inputs: [count_matrix, abundance_table]
+    outputs: [count_matrix]
+    tools: [deseq2, edger]
+    note: >
+      In CSE 185, normalization is within-sample (RPKM / TPM). For differential 
+      expression, DESeq2 (median-of-ratios) and edgeR (TMM) normalize across 
+      samples — standard downstream RNA-seq, beyond the labs.
+
+  - id: sample_qc
+    label: "Sample-level QC"
+    type: analysis
+    mainline: true
+    goal: >
+      Check that samples group as expected before testing — PCA and
+      clustering on the normalized counts to catch outliers, batch
+      effects, or swapped labels.
+    inputs: [count_matrix]
+    outputs: [count_matrix]
+    tools: [deseq2]
+    note: >
+      A checkpoint before testing, not a transform — the same counts
+      continue to differential expression while QC emits a PCA /
+      clustering report. Standard downstream RNA-seq, beyond the CSE
+      185 labs; PCA is typically run on variance-stabilized counts
+      (DESeq2 vst + plotPCA).
+
+  - id: differential_expression
+    label: "Differential expression"
+    type: transform
+    mainline: true
+    goal: >
+      Test which genes change expression between conditions, reporting
+      a fold change and a multiple-testing-corrected significance for
+      each gene.
+    inputs: [count_matrix]
+    outputs: [de_results]
+    tools: [deseq2, edger, limma]
+    note: >
+      Standard downstream RNA-seq, beyond the CSE 185 labs.
+
+  - id: functional_enrichment
+    label: "Pathway / functional enrichment"
+    type: analysis
+    mainline: true
+    goal: >
+      Ask whether the differentially expressed genes cluster into
+      known pathways or gene sets (GO terms, KEGG / Reactome), to read
+      biological meaning out of the gene list.
+    inputs: [de_results]
+    outputs: [enrichment_results]
+    tools: [clusterprofiler, gsea, gprofiler2]
+    note: >
+      Standard downstream RNA-seq, beyond the CSE 185 labs.
+
 # ===========================================================================
 # TOOLS — referenced by id from steps[].tools.
 # Each tool has a one-liner and a documentation URL.
@@ -454,6 +717,76 @@ tools:
     url: "https://github.com/tjunier/newick_utils"
     one_line: "Print node-to-node distances within a Newick tree."
 
+  - id: lsd2
+    label: "LSD2"
+    url: "https://github.com/tothuhien/lsd2"
+    one_line: "Least-squares dating — outgroup-roots and time-scales a mutation tree from tip dates."
+
+  - id: treetime
+    label: "TreeTime"
+    url: "https://treetime.readthedocs.io"
+    one_line: "Maximum-likelihood phylodynamics — roots and dates a tree from sampling dates. (Use the full `treetime` pipeline.)"
+
+  - id: tn93
+    label: "TN93"
+    url: "https://github.com/veg/tn93"
+    one_line: "Pairwise genetic distances under the Tamura-Nei 93 substitution model. Reads FASTA from stdin by default."
+
+  - id: star
+    label: "STAR"
+    url: "https://github.com/alexdobin/STAR"
+    one_line: "Splice-aware RNA-seq aligner. Build a genome index from FASTA + GTF, then map."
+
+  - id: salmon
+    label: "Salmon"
+    url: "https://combine-lab.github.io/salmon"
+    one_line: "Alignment-free transcript quantification. Index a transcriptome, then quantify reads against it."
+
+  - id: kallisto
+    label: "kallisto"
+    url: "https://pachterlab.github.io/kallisto"
+    one_line: "Pseudoalignment-based transcript quantification — very fast. Index a transcriptome, then quantify."
+
+  - id: featurecounts
+    label: "featureCounts"
+    url: "https://subread.sourceforge.net"
+    one_line: "Counts reads overlapping gene features (SAM/BAM + GTF) into a gene-by-sample matrix."
+
+  - id: htseq
+    label: "HTSeq (htseq-count)"
+    url: "https://htseq.readthedocs.io"
+    one_line: "Assigns aligned reads to annotated genes and tallies per-gene counts."
+
+  - id: deseq2
+    label: "DESeq2"
+    url: "https://bioconductor.org/packages/DESeq2"
+    one_line: "Differential expression via negative-binomial models; median-of-ratios normalization, PCA, LFC shrinkage."
+
+  - id: edger
+    label: "edgeR"
+    url: "https://bioconductor.org/packages/edgeR"
+    one_line: "Differential expression for count data; TMM normalization and empirical-Bayes dispersion."
+
+  - id: limma
+    label: "limma (limma-voom)"
+    url: "https://bioconductor.org/packages/limma"
+    one_line: "Linear models for expression data; voom precision weights enable RNA-seq DE."
+
+  - id: clusterprofiler
+    label: "clusterProfiler"
+    url: "https://bioconductor.org/packages/clusterProfiler"
+    one_line: "Over-representation and GSEA enrichment of GO terms and pathways from gene lists."
+
+  - id: gsea
+    label: "GSEA"
+    url: "https://www.gsea-msigdb.org/gsea"
+    one_line: "Gene Set Enrichment Analysis — tests whether predefined gene sets shift across the ranked DE signal."
+
+  - id: gprofiler2
+    label: "g:Profiler"
+    url: "https://biit.cs.ut.ee/gprofiler"
+    one_line: "Functional enrichment (GO, KEGG, Reactome) for gene lists, with multiple-testing control."
+
 # ===========================================================================
 # EDGES — explicit, one per file-format flow between two steps.
 # ===========================================================================
@@ -472,4 +805,19 @@ edges:
   - {from: build_consensus, to: msa,                     format: fasta,
      note: "Aggregate many single-sample consensus FASTAs into one multi-FASTA before MSA."}
   - {from: msa,             to: infer_phylogeny,         format: fasta}
+  - {from: msa,             to: genetic_distances,       format: fasta,
+     note: "Same MSA feeds both the tree and the pairwise-distance clustering route."}
   - {from: infer_phylogeny, to: terminal_branch_lengths, format: newick}
+  - {from: infer_phylogeny, to: root_date_tree,          format: newick,
+     note: "Mutation tree in; tip dates (sample metadata) supplied separately to root and date it."}
+  - {from: genetic_distances, to: molecular_clustering,  format: pairwise_distances}
+  - {from: trim_reads,      to: rnaseq_mapping,          format: fastq}
+  - {from: trim_reads,      to: quantify_transcripts,    format: fastq}
+  - {from: rnaseq_mapping,  to: build_count_matrix,      format: sam,
+     note: "STAR writes Aligned.out.sam; featureCounts / HTSeq count reads per gene from it."}
+  - {from: quantify_transcripts, to: build_count_matrix, format: abundance_table,
+     note: "Transcript abundances are imported (e.g. tximport) into the same gene-level count matrix."}
+  - {from: build_count_matrix, to: normalize_counts,     format: count_matrix}
+  - {from: normalize_counts, to: sample_qc,              format: count_matrix}
+  - {from: sample_qc,        to: differential_expression, format: count_matrix}
+  - {from: differential_expression, to: functional_enrichment, format: de_results}

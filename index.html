@@ -282,8 +282,8 @@
       <p class="page-eyebrow">CSE 185 · Advanced Bioinformatics Lab</p>
       <h1 class="page-title">Pipeline Map</h1>
       <p class="page-lede">
-        Map of the dry lab pipeline in CSE&nbsp;185 Labs (currently
-        Labs&nbsp;1&ndash;6). Each box is a step in the research flow, and
+        Map of the dry lab pipeline in CSE&nbsp;185 Labs
+        (Labs&nbsp;1&ndash;9). Each box is a step in the research flow, and
         labels on the lines are the file formats that pass between them.
         Click any box or label for details.
       </p>
@@ -376,6 +376,18 @@
         }
       }
 
+      // Row layout follows a spanning tree (each node hangs off its
+      // first parent), so a convergence — two parents feeding one child,
+      // e.g. STAR + Salmon/kallisto → count matrix — doesn't collapse
+      // both parents onto the same row. All edges are still drawn; only
+      // the row assignment uses the tree.
+      const layoutChildren = {};
+      mainline.forEach(s => { layoutChildren[s.id] = []; });
+      mainline.forEach(s => {
+        const ps = parentsOf[s.id];
+        if (ps.length > 0) layoutChildren[ps[0]].push(s.id);
+      });
+
       const roots = mainline.filter(s => parentsOf[s.id].length === 0).map(s => s.id);
       const rowY = {};
       let nextLeafRow = 0;
@@ -384,7 +396,7 @@
       function walk(id) {
         if (visited.has(id)) return rowY[id];
         visited.add(id);
-        const kids = childrenOf[id].slice().sort((a, b) =>
+        const kids = layoutChildren[id].slice().sort((a, b) =>
           mainline.findIndex(s => s.id === a) - mainline.findIndex(s => s.id === b)
         );
         if (kids.length === 0) {
@@ -396,6 +408,23 @@
         return rowY[id];
       }
       roots.forEach(walk);
+
+      // Center each convergence node between ALL its parents (not just
+      // the spanning-tree one), and carry the shift down its subtree —
+      // so a merged downstream line sits midway between the branches
+      // that feed it instead of hugging the top one.
+      function shiftSubtree(id, delta) {
+        rowY[id] += delta;
+        for (const k of layoutChildren[id]) shiftSubtree(k, delta);
+      }
+      const byLevel = mainline.slice().sort((a, b) => level[a.id] - level[b.id]);
+      for (const s of byLevel) {
+        const ps = parentsOf[s.id];
+        if (ps.length > 1) {
+          const target = ps.reduce((sum, p) => sum + rowY[p], 0) / ps.length;
+          shiftSubtree(s.id, target - rowY[s.id]);
+        }
+      }
 
       return { level, rowY };
     }
@@ -413,7 +442,7 @@
 
       // Wider columns → format pills on the lines have breathing room
       // (e.g. the FASTA pill between genome_assembly and assembly_qc).
-      const COL_W = 420, ROW_H = 144;
+      const COL_W = 500, ROW_H = 144;
       const BOX_W = 280, BOX_H = 96;
       const PAD_X = 60,  PAD_Y = 60;
       const STUB_LEN = 170;
@@ -605,6 +634,13 @@
       return clamp(Math.min(sx, sy), MIN_ZOOM, 1);
     }
 
+    // Zoom so the pipeline's full vertical extent fills the box; width
+    // overflows and scrolls left-to-right (the natural reading order).
+    function fitHeightZoom() {
+      const wrap = document.getElementById('map-wrap');
+      return clamp((wrap.clientHeight - 24) / CONTENT_H, MIN_ZOOM, 1);
+    }
+
     // Zoom while keeping the (anchorX, anchorY) point — given in
     // map-wrap viewport coords — stable under the cursor.
     function setZoomAroundPoint(newZoom, anchorX, anchorY) {
@@ -659,10 +695,10 @@
         wrap.classList.remove('dragging');
       });
 
-      // ---- Initial view: natural zoom, scrolled to the start of the
-      //      pipeline so NGS sequencing is at the left edge.
+      // ---- Initial view: fit the full height into the box, scrolled to
+      //      the start of the pipeline so NGS sequencing is at the left.
       requestAnimationFrame(() => {
-        applyZoom(1);
+        applyZoom(fitHeightZoom());
         wrap.scrollLeft = 0;
         wrap.scrollTop  = 0;
       });
@@ -758,7 +794,9 @@
         } else {
           root.appendChild(h('div', {
             class: 'tool-entry-none',
-            text: '(No tool — upstream / aggregation step.)',
+            text: step.note
+              ? cleanText(step.note)
+              : '(No tool — upstream / aggregation step.)',
           }));
         }
       });
